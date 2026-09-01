@@ -233,7 +233,7 @@ const calls = {};      // peerId -> MediaConnection
 const dataConns = {};  // peerId -> DataConnection
 const knownPeers = new Set(); // peerIds in room (host maintains authoritative list)
 const peerNames = {}; // peerId -> display name
-let camOn = true, micOn = true, sharingScreen = false;
+let camOn = false, micOn = false, sharingScreen = false;
 
 function toast(msg, ms = 2500) {
   const t = $('toast');
@@ -440,6 +440,10 @@ async function enterRoom(code, hosting) {
   isHost = hosting;
 
   localStream = await getLocalStream();
+  localStream.getAudioTracks().forEach(t => t.enabled = false);
+  localStream.getVideoTracks().forEach(t => t.enabled = false);
+  $('micBtn').textContent = '🔇 Mutado';
+  $('camBtn').textContent = '📷 Desligada';
 
   const myId = hosting ? code : (code + '-' + Math.random().toString(36).substring(2, 8));
   await initPeer(myId);
