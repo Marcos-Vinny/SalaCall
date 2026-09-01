@@ -469,7 +469,7 @@ $('createBtn').onclick = async () => {
   myName = getValidName();
   if (!myName) return;
   try { await enterRoom(genRoomCode(), true); }
-  catch (e) { toast('Não foi possível criar a sala.'); }
+  catch (e) { toast('Não foi possível criar a sala: ' + (e.message || e.name || e) + '. Se estiver num navegador dentro de outro app (Instagram, TikTok etc.), abra no Chrome/Safari.', 6000); }
 };
 
 $('joinBtn').onclick = async () => {
@@ -478,7 +478,7 @@ $('joinBtn').onclick = async () => {
   const code = $('roomInput').value.trim().toUpperCase();
   if (!code) return toast('Cole o código da sala primeiro.');
   try { await enterRoom(code, false); }
-  catch (e) { toast('Não foi possível entrar. Confira o código.'); }
+  catch (e) { toast('Não foi possível entrar: ' + (e.message || e.name || e) + '. Se estiver num navegador dentro de outro app (Instagram, TikTok etc.), abra no Chrome/Safari.', 6000); }
 };
 
 $('copyBtn').onclick = () => {
