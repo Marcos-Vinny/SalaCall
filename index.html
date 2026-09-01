@@ -410,12 +410,18 @@ function setupDataConn(conn) {
       peerNames[conn.peer] = data.name;
       const lbl = document.querySelector('#tile-' + conn.peer + ' .label');
       if (lbl) lbl.textContent = data.name;
+    } else if (data.type === 'bye') {
+      removeTile(conn.peer);
+      removeTile(conn.peer + '-screen');
+      if (calls[conn.peer]) { calls[conn.peer].close(); delete calls[conn.peer]; }
     }
   });
 
   conn.on('close', () => {
     delete dataConns[conn.peer];
     knownPeers.delete(conn.peer);
+    removeTile(conn.peer);
+    removeTile(conn.peer + '-screen');
   });
 }
 
@@ -538,7 +544,17 @@ function stopScreenShare() {
   $('screenBtn').textContent = '🖥️ Compartilhar tela';
 }
 
-$('leaveBtn').onclick = () => location.reload();
+function leaveRoom() {
+  Object.values(dataConns).forEach(c => { if (c.open) c.send({ type: 'bye' }); });
+  Object.values(calls).forEach(c => c.close());
+  Object.values(dataConns).forEach(c => c.close());
+  if (localStream) localStream.getTracks().forEach(t => t.stop());
+  if (screenStream) screenStream.getTracks().forEach(t => t.stop());
+  if (peer) peer.destroy();
+}
+
+$('leaveBtn').onclick = () => { leaveRoom(); setTimeout(() => location.reload(), 150); };
+window.addEventListener('beforeunload', leaveRoom);
 </script>
 </body>
 </html>
