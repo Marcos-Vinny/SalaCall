@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SalaCall — Chamada + Compartilhar Tela</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+  :root {
+    --bg: #0e0f13;
+    --panel: #16181f;
+    --panel-2: #1e2129;
+    --accent: #7c5cff;
+    --accent-2: #4ade80;
+    --danger: #ff5c5c;
+    --text: #e9e9ee;
+    --muted: #8b8d98;
+    --border: #2a2d38;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: radial-gradient(circle at 20% 0%, #1a1730 0%, var(--bg) 45%);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  .container { max-width: 1100px; margin: 0 auto; padding: 24px 16px 60px; }
+  header { text-align: center; margin-bottom: 28px; }
+  header h1 {
+    font-size: 26px;
+    margin: 0 0 6px;
+    background: linear-gradient(90deg, var(--accent), #a78bfa);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    font-weight: 700;
+  }
+  header p { color: var(--muted); font-size: 14px; margin: 0; }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 22px;
+  }
+
+  .lobby { max-width: 460px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+  .lobby label { font-size: 13px; color: var(--muted); }
+  .lobby input {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text);
+    font-size: 15px;
+    margin-top: 6px;
+  }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; }
+
+  button {
+    cursor: pointer;
+    border: none;
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 14px;
+    font-weight: 600;
+    transition: transform .08s ease, opacity .15s ease;
+  }
+  button:active { transform: scale(0.97); }
+  .btn-primary { background: linear-gradient(90deg, var(--accent), #9575ff); color: white; }
+  .btn-secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  .btn-danger { background: var(--danger); color: white; }
+  .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .hidden { display: none !important; }
+
+  .room-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 18px; flex-wrap: wrap; gap: 10px;
+  }
+  .room-code {
+    font-family: monospace; font-size: 15px; background: var(--panel-2);
+    padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border);
+    letter-spacing: 1px;
+  }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-2); display: inline-block; margin-right: 6px; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  .tile {
+    background: #000;
+    border-radius: 14px;
+    overflow: hidden;
+    position: relative;
+    aspect-ratio: 16 / 10;
+    border: 1px solid var(--border);
+  }
+  .tile video { width: 100%; height: 100%; object-fit: cover; background: #000; }
+  .tile .label {
+    position: absolute; bottom: 8px; left: 10px;
+    font-size: 12px; background: rgba(0,0,0,0.55);
+    padding: 3px 9px; border-radius: 20px;
+  }
+  .tile.screen video { object-fit: contain; background: #0a0a0a; }
+
+  .controls {
+    display: flex; justify-content: center; gap: 12px; flex-wrap: wrap;
+    padding-top: 10px; border-top: 1px solid var(--border);
+  }
+  .controls button { min-width: 130px; }
+
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--panel-2); border: 1px solid var(--border);
+    padding: 10px 18px; border-radius: 30px; font-size: 13px; color: var(--muted);
+    box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+  }
+  .hint { font-size: 12px; color: var(--muted); text-align: center; margin-top: 10px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>SalaCall</h1>
+    <p>Chamada de voz/vídeo + compartilhamento de tela entre amigos, direto no navegador.</p>
+  </header>
+
+  <!-- LOBBY -->
+  <div id="lobby" class="card lobby">
+    <div>
+      <label>Seu nome</label>
+      <input id="nameInput" placeholder="ex: João" maxlength="20" />
+    </div>
+
+    <button class="btn-primary" id="createBtn">Criar sala nova</button>
+
+    <div style="text-align:center; color:var(--muted); font-size:12px;">— ou —</div>
+
+    <div>
+      <label>Código da sala de um amigo</label>
+      <input id="roomInput" placeholder="cole o código aqui" />
+    </div>
+    <button class="btn-secondary" id="joinBtn">Entrar na sala</button>
+
+    <p class="hint">Sala dos manos. Todos precisam liberar acesso ao microfone (e câmera, se quiserem).</p>
+  </div>
+
+  <!-- ROOM -->
+  <div id="room" class="card hidden">
+    <div class="room-bar">
+      <div><span class="status-dot"></span>Conectado como <b id="myNameLabel"></b></div>
+      <div>
+        Código da sala:
+        <span class="room-code" id="roomCodeLabel"></span>
+        <button class="btn-ghost" id="copyBtn" style="margin-left:6px; padding:8px 12px;">Copiar</button>
+      </div>
+    </div>
+
+    <div class="grid" id="videoGrid"></div>
+
+    <div class="controls">
+      <button class="btn-secondary" id="micBtn">🎤 Mudo</button>
+      <button class="btn-secondary" id="camBtn">📷 Câmera</button>
+      <button class="btn-primary" id="screenBtn">🖥️ Compartilhar tela</button>
+      <button class="btn-danger" id="leaveBtn">Sair da sala</button>
+    </div>
+    <p class="hint">Compartilhando a tela? Só clicar em "Compartilhar tela" de novo pra parar e voltar pra câmera.</p>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let peer, localStream, screenStream, myName, roomId, isHost = false;
+const calls = {};      // peerId -> MediaConnection
+const dataConns = {};  // peerId -> DataConnection
+const knownPeers = new Set(); // peerIds in room (host maintains authoritative list)
+let camOn = true, micOn = true, sharingScreen = false;
+
+function toast(msg, ms = 2500) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.remove('hidden');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.add('hidden'), ms);
+}
+
+function genRoomCode() {
+  return Math.random().toString(36).substring(2, 8).toUpperCase();
+}
+
+async function getLocalStream() {
+  try {
+    return await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+  } catch (e) {
+    toast('Sem câmera disponível, entrando só com áudio.');
+    return await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  }
+}
+
+function addTile(id, stream, label, isScreen = false) {
+  removeTile(id + (isScreen ? '-screen' : ''));
+  const tile = document.createElement('div');
+  tile.className = 'tile' + (isScreen ? ' screen' : '');
+  tile.id = 'tile-' + id + (isScreen ? '-screen' : '');
+  const video = document.createElement('video');
+  video.autoplay = true;
+  video.playsInline = true;
+  if (id === 'me') video.muted = true;
+  video.srcObject = stream;
+  const lbl = document.createElement('div');
+  lbl.className = 'label';
+  lbl.textContent = label;
+  tile.appendChild(video);
+  tile.appendChild(lbl);
+  $('videoGrid').appendChild(tile);
+}
+
+function removeTile(id) {
+  const el = document.getElementById('tile-' + id);
+  if (el) el.remove();
+}
+
+async function initPeer(id) {
+  return new Promise((resolve, reject) => {
+    peer = new Peer(id, { debug: 1 });
+    peer.on('open', (pid) => resolve(pid));
+    peer.on('error', (err) => {
+      console.error(err);
+      toast('Erro: ' + err.type);
+      reject(err);
+    });
+  });
+}
+
+function setupIncomingHandlers() {
+  peer.on('call', (call) => {
+    call.answer(localStream);
+    handleCall(call);
+  });
+
+  peer.on('connection', (conn) => {
+    setupDataConn(conn);
+  });
+}
+
+function handleCall(call) {
+  calls[call.peer] = call;
+  call.on('stream', (remoteStream) => {
+    addTile(call.peer, remoteStream, dataConns[call.peer]?.metadata?.name || call.peer);
+  });
+  call.on('close', () => {
+    removeTile(call.peer);
+    delete calls[call.peer];
+  });
+}
+
+function connectToPeer(remoteId) {
+  if (remoteId === peer.id || calls[remoteId]) return;
+  const call = peer.call(remoteId, localStream, { metadata: { name: myName } });
+  handleCall(call);
+
+  const conn = peer.connect(remoteId, { metadata: { name: myName } });
+  setupDataConn(conn);
+}
+
+function setupDataConn(conn) {
+  dataConns[conn.peer] = conn;
+  conn.on('open', () => {
+    conn.send({ type: 'hello', name: myName });
+    knownPeers.add(conn.peer);
+
+    if (isHost) {
+      // send current peer list to the new joiner
+      conn.send({ type: 'peer-list', peers: [...knownPeers].filter(p => p !== conn.peer) });
+      // tell everyone else about the newcomer
+      broadcastExcept(conn.peer, { type: 'new-peer', peerId: conn.peer });
+    }
+  });
+
+  conn.on('data', (data) => {
+    if (data.type === 'peer-list') {
+      data.peers.forEach(pid => {
+        knownPeers.add(pid);
+        connectToPeer(pid);
+      });
+    } else if (data.type === 'new-peer') {
+      knownPeers.add(data.peerId);
+      connectToPeer(data.peerId);
+    } else if (data.type === 'hello') {
+      const lbl = document.querySelector('#tile-' + conn.peer + ' .label');
+      if (lbl) lbl.textContent = data.name;
+    }
+  });
+
+  conn.on('close', () => {
+    delete dataConns[conn.peer];
+    knownPeers.delete(conn.peer);
+  });
+}
+
+function broadcastExcept(exceptId, msg) {
+  Object.values(dataConns).forEach(c => {
+    if (c.peer !== exceptId && c.open) c.send(msg);
+  });
+}
+
+async function enterRoom(code, hosting) {
+  myName = $('nameInput').value.trim() || 'Convidado';
+  roomId = code;
+  isHost = hosting;
+
+  localStream = await getLocalStream();
+
+  const myId = hosting ? code : (code + '-' + Math.random().toString(36).substring(2, 8));
+  await initPeer(myId);
+  setupIncomingHandlers();
+
+  if (!hosting) {
+    const conn = peer.connect(code, { metadata: { name: myName } });
+    setupDataConn(conn);
+    const call = peer.call(code, localStream, { metadata: { name: myName } });
+    handleCall(call);
+  }
+
+  knownPeers.add(peer.id);
+
+  $('lobby').classList.add('hidden');
+  $('room').classList.remove('hidden');
+  $('myNameLabel').textContent = myName;
+  $('roomCodeLabel').textContent = roomId;
+  addTile('me', localStream, myName + ' (você)');
+}
+
+$('createBtn').onclick = async () => {
+  try { await enterRoom(genRoomCode(), true); }
+  catch (e) { toast('Não foi possível criar a sala.'); }
+};
+
+$('joinBtn').onclick = async () => {
+  const code = $('roomInput').value.trim().toUpperCase();
+  if (!code) return toast('Cole o código da sala primeiro.');
+  try { await enterRoom(code, false); }
+  catch (e) { toast('Não foi possível entrar. Confira o código.'); }
+};
+
+$('copyBtn').onclick = () => {
+  navigator.clipboard.writeText(roomId);
+  toast('Código copiado!');
+};
+
+$('micBtn').onclick = () => {
+  micOn = !micOn;
+  localStream.getAudioTracks().forEach(t => t.enabled = micOn);
+  $('micBtn').textContent = micOn ? '🎤 Mudo' : '🔇 Mutado';
+};
+
+$('camBtn').onclick = () => {
+  if (sharingScreen) return toast('Pare o compartilhamento de tela primeiro.');
+  camOn = !camOn;
+  localStream.getVideoTracks().forEach(t => t.enabled = camOn);
+  $('camBtn').textContent = camOn ? '📷 Câmera' : '📷 Desligada';
+};
+
+$('screenBtn').onclick = async () => {
+  if (!sharingScreen) {
+    try {
+      screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+    } catch (e) {
+      return toast('Compartilhamento cancelado.');
+    }
+    const screenTrack = screenStream.getVideoTracks()[0];
+
+    Object.values(calls).forEach(call => {
+      const sender = call.peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+      if (sender) sender.replaceTrack(screenTrack);
+    });
+
+    addTile('me', screenStream, myName + ' (sua tela)', true);
+    document.getElementById('tile-me').classList.add('hidden');
+
+    screenTrack.onended = () => stopScreenShare();
+    sharingScreen = true;
+    $('screenBtn').textContent = '🛑 Parar compartilhamento';
+  } else {
+    stopScreenShare();
+  }
+};
+
+function stopScreenShare() {
+  if (!sharingScreen) return;
+  const camTrack = localStream.getVideoTracks()[0];
+  Object.values(calls).forEach(call => {
+    const sender = call.peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+    if (sender && camTrack) sender.replaceTrack(camTrack);
+  });
+  if (screenStream) screenStream.getTracks().forEach(t => t.stop());
+  removeTile('me-screen');
+  document.getElementById('tile-me').classList.remove('hidden');
+  sharingScreen = false;
+  $('screenBtn').textContent = '🖥️ Compartilhar tela';
+}
+
+$('leaveBtn').onclick = () => location.reload();
+</script>
+</body>
+</html>
