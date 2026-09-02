@@ -397,7 +397,18 @@ function updateFullscreenIcons() {
 
 async function initPeer(id) {
   return new Promise((resolve, reject) => {
-    peer = new Peer(id, { debug: 1 });
+    peer = new Peer(id, {
+      debug: 1,
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+          { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+          { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+        ]
+      }
+    });
     peer.on('open', (pid) => resolve(pid));
     peer.on('error', (err) => {
       console.error(err);
@@ -462,7 +473,6 @@ function setupDataConn(conn) {
       });
     } else if (data.type === 'new-peer') {
       knownPeers.add(data.peerId);
-      connectToPeer(data.peerId);
     } else if (data.type === 'hello') {
       peerNames[conn.peer] = data.name;
       const lbl = document.querySelector('#tile-' + conn.peer + ' .label');
