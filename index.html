@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>TimeSpeak — Chamada + Compartilhar Tela</title>
+<title>SalaCall — Chamada + Compartilhar Tela</title>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <style>
   :root {
@@ -124,6 +124,27 @@
   .tile:hover .maximize-btn,
   .tile:hover .fullscreen-btn { opacity: 1; }
 
+  .vol-wrap {
+    position: absolute; left: 8px; right: 8px; bottom: 34px;
+    display: flex; align-items: center; gap: 6px;
+    opacity: 0; transition: opacity .15s ease;
+  }
+  .vol-wrap span { font-size: 12px; }
+  .vol-wrap input[type=range] { flex: 1; accent-color: var(--accent); height: 4px; }
+  .tile:hover .vol-wrap,
+  .tile.expanded .vol-wrap { opacity: 1; }
+
+  .kick-btn {
+    position: absolute; top: 8px; left: 8px;
+    width: 32px; height: 32px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255,92,92,0.85); color: white;
+    border-radius: 8px; font-size: 14px;
+    opacity: 0; transition: opacity .15s ease;
+  }
+  .tile:hover .kick-btn,
+  .tile.expanded .kick-btn { opacity: 1; }
+
   .grid.has-expanded { grid-template-columns: 1fr; }
   .grid.has-expanded .tile:not(.expanded) { display: none; }
   .tile.expanded {
@@ -177,7 +198,7 @@
 <body>
 <div class="container">
   <header>
-    <h1>TimeSpeak</h1>
+    <h1>SalaCall</h1>
     <p>Chamada de voz/vídeo + compartilhamento de tela entre amigos, direto no navegador.</p>
   </header>
 
@@ -285,6 +306,42 @@ function addTile(id, stream, label, isScreen = false) {
   tile.appendChild(lbl);
   tile.appendChild(maxBtn);
   tile.appendChild(fsBtn);
+
+  if (id !== 'me' && !isScreen) {
+    const volWrap = document.createElement('div');
+    volWrap.className = 'vol-wrap';
+    const volIcon = document.createElement('span');
+    volIcon.textContent = '🔊';
+    const volSlider = document.createElement('input');
+    volSlider.type = 'range';
+    volSlider.min = '0';
+    volSlider.max = '100';
+    volSlider.value = '100';
+    volSlider.oninput = () => { video.volume = volSlider.value / 100; };
+    volWrap.appendChild(volIcon);
+    volWrap.appendChild(volSlider);
+    tile.appendChild(volWrap);
+
+    if (isHost) {
+      const kickBtn = document.createElement('button');
+      kickBtn.className = 'kick-btn';
+      kickBtn.title = 'Remover da sala';
+      kickBtn.textContent = '⛔';
+      kickBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (!confirm('Remover ' + label + ' da sala?')) return;
+        const conn = dataConns[id];
+        if (conn && conn.open) conn.send({ type: 'kick' });
+        if (calls[id]) { calls[id].close(); delete calls[id]; }
+        if (conn) conn.close();
+        delete dataConns[id];
+        knownPeers.delete(id);
+        removeTile(id);
+      };
+      tile.appendChild(kickBtn);
+    }
+  }
+
   $('videoGrid').appendChild(tile);
 }
 
@@ -410,6 +467,12 @@ function setupDataConn(conn) {
       peerNames[conn.peer] = data.name;
       const lbl = document.querySelector('#tile-' + conn.peer + ' .label');
       if (lbl) lbl.textContent = data.name;
+    } else if (data.type === 'kick') {
+      if (conn.peer === roomId) {
+        toast('Você foi removido da sala pelo host.', 4000);
+        leaveRoom();
+        setTimeout(() => location.reload(), 1200);
+      }
     } else if (data.type === 'bye') {
       removeTile(conn.peer);
       removeTile(conn.peer + '-screen');
