@@ -439,14 +439,29 @@ function setupIncomingHandlers() {
   });
 }
 
+const remoteStreams = {}; // peerId -> MediaStream
+
 function handleCall(call) {
   calls[call.peer] = call;
   call.on('stream', (remoteStream) => {
+    remoteStreams[call.peer] = remoteStream;
     addTile(call.peer, remoteStream, peerNames[call.peer] || call.metadata?.name || 'Convidado');
   });
   call.on('close', () => {
     removeTile(call.peer);
     delete calls[call.peer];
+    delete remoteStreams[call.peer];
+  });
+}
+
+function refreshRemoteVideo(peerId) {
+  const video = document.querySelector('#tile-' + peerId + ' video');
+  const stream = remoteStreams[peerId];
+  if (!video || !stream) return;
+  video.srcObject = null;
+  requestAnimationFrame(() => {
+    video.srcObject = stream;
+    video.play().catch(() => {});
   });
 }
 
@@ -487,6 +502,10 @@ function setupDataConn(conn) {
       peerNames[conn.peer] = data.name;
       const lbl = document.querySelector('#tile-' + conn.peer + ' .label');
       if (lbl) lbl.textContent = data.name;
+    } else if (data.type === 'screen-share') {
+      const tile = document.getElementById('tile-' + conn.peer);
+      if (tile) tile.classList.toggle('screen', data.on);
+      refreshRemoteVideo(conn.peer);
     } else if (data.type === 'kick') {
       if (conn.peer === roomId) {
         toast('Você foi removido da sala pelo host.', 4000);
@@ -605,6 +624,7 @@ $('screenBtn').onclick = async () => {
     addTile('me', screenStream, myName + ' (sua tela)', true);
     document.getElementById('tile-me').classList.add('hidden');
 
+    broadcastExcept(null, { type: 'screen-share', on: true });
     screenTrack.onended = () => stopScreenShare();
     sharingScreen = true;
     $('screenBtn').textContent = '🛑 Parar compartilhamento';
@@ -625,6 +645,7 @@ function stopScreenShare() {
   document.getElementById('tile-me').classList.remove('hidden');
   sharingScreen = false;
   $('screenBtn').textContent = '🖥️ Compartilhar tela';
+  broadcastExcept(null, { type: 'screen-share', on: false });
 }
 
 function leaveRoom() {
