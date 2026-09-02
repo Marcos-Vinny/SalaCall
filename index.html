@@ -395,6 +395,16 @@ function updateFullscreenIcons() {
   }
 }
 
+function getSendStream() {
+  if (sharingScreen && screenStream) {
+    const s = new MediaStream();
+    localStream.getAudioTracks().forEach(t => s.addTrack(t));
+    screenStream.getVideoTracks().forEach(t => s.addTrack(t));
+    return s;
+  }
+  return localStream;
+}
+
 async function initPeer(id) {
   return new Promise((resolve, reject) => {
     peer = new Peer(id, {
@@ -420,7 +430,7 @@ async function initPeer(id) {
 
 function setupIncomingHandlers() {
   peer.on('call', (call) => {
-    call.answer(localStream);
+    call.answer(getSendStream());
     handleCall(call);
   });
 
@@ -442,7 +452,7 @@ function handleCall(call) {
 
 function connectToPeer(remoteId) {
   if (remoteId === peer.id || calls[remoteId]) return;
-  const call = peer.call(remoteId, localStream, { metadata: { name: myName } });
+  const call = peer.call(remoteId, getSendStream(), { metadata: { name: myName } });
   handleCall(call);
 
   const conn = peer.connect(remoteId, { metadata: { name: myName } });
@@ -531,7 +541,7 @@ async function enterRoom(code, hosting) {
   if (!hosting) {
     const conn = peer.connect(code, { metadata: { name: myName } });
     setupDataConn(conn);
-    const call = peer.call(code, localStream, { metadata: { name: myName } });
+    const call = peer.call(code, getSendStream(), { metadata: { name: myName } });
     handleCall(call);
   }
 
