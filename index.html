@@ -191,8 +191,18 @@
     background: var(--panel-2); border: 1px solid var(--border);
     padding: 10px 18px; border-radius: 30px; font-size: 13px; color: var(--muted);
     box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+    max-width: 90vw;
+    text-align: center;
   }
   .hint { font-size: 12px; color: var(--muted); text-align: center; margin-top: 10px; line-height: 1.5; }
+
+  .conn-badge {
+    position: absolute; top: 8px; right: 88px;
+    font-size: 10px; padding: 3px 7px; border-radius: 6px;
+    background: rgba(0,0,0,0.55); color: var(--muted);
+    opacity: 0; transition: opacity .15s ease;
+  }
+  .tile:hover .conn-badge, .tile.expanded .conn-badge { opacity: 1; }
 </style>
 </head>
 <body>
@@ -288,6 +298,7 @@ function addTile(id, stream, label, isScreen = false) {
   video.playsInline = true;
   if (id === 'me') video.muted = true;
   video.srcObject = stream;
+  video.play().catch(err => console.warn('play() falhou (tile ' + tileId + '):', err));
   video.ondblclick = () => toggleExpand(tileId);
   const lbl = document.createElement('div');
   lbl.className = 'label';
@@ -306,6 +317,14 @@ function addTile(id, stream, label, isScreen = false) {
   tile.appendChild(lbl);
   tile.appendChild(maxBtn);
   tile.appendChild(fsBtn);
+
+  if (id !== 'me') {
+    const badge = document.createElement('div');
+    badge.className = 'conn-badge';
+    badge.id = 'badge-' + tileId;
+    badge.textContent = '';
+    tile.appendChild(badge);
+  }
 
   if (id !== 'me' && !isScreen) {
     const volWrap = document.createElement('div');
@@ -405,19 +424,25 @@ function getSendStream() {
   return localStream;
 }
 
+// ICE config: STUN + múltiplos TURN de fallback.
+// O TURN é essencial quando um lado está atrás de NAT/firewall restritivo
+// (comum em redes de PC/empresa) e a conexão P2P direta não fecha.
+const ICE_CONFIG = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+  ],
+  iceCandidatePoolSize: 4
+};
+
 async function initPeer(id) {
   return new Promise((resolve, reject) => {
     peer = new Peer(id, {
       debug: 1,
-      config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-          { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-          { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
-        ]
-      }
+      config: ICE_CONFIG
     });
     peer.on('open', (pid) => resolve(pid));
     peer.on('error', (err) => {
@@ -441,8 +466,32 @@ function setupIncomingHandlers() {
 
 const remoteStreams = {}; // peerId -> MediaStream
 
+function watchConnectionState(call) {
+  // Ajuda a diagnosticar: mostra no console e num badge discreto
+  // se a conexão ficou "relay" (TURN) em vez de direta (host/srflx).
+  const pc = call.peerConnection;
+  if (!pc) return;
+  pc.oniceconnectionstatechange = () => {
+    console.log('[ICE] ' + call.peer + ':', pc.iceConnectionState);
+    if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+      pc.getStats(null).then(stats => {
+        stats.forEach(report => {
+          if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) {
+            const localCand = stats.get(report.localCandidateId);
+            const type = localCand ? localCand.candidateType : '?';
+            const badge = document.getElementById('badge-' + call.peer);
+            if (badge) badge.textContent = type === 'relay' ? '↻ relay (TURN)' : '● direto';
+            console.log('[ICE pair] ' + call.peer + ' via', type);
+          }
+        });
+      }).catch(() => {});
+    }
+  };
+}
+
 function handleCall(call) {
   calls[call.peer] = call;
+  watchConnectionState(call);
   call.on('stream', (remoteStream) => {
     remoteStreams[call.peer] = remoteStream;
     addTile(call.peer, remoteStream, peerNames[call.peer] || call.metadata?.name || 'Convidado');
@@ -452,6 +501,7 @@ function handleCall(call) {
     delete calls[call.peer];
     delete remoteStreams[call.peer];
   });
+  call.on('error', (err) => console.error('[call error]', call.peer, err));
 }
 
 function refreshRemoteVideo(peerId) {
@@ -461,7 +511,7 @@ function refreshRemoteVideo(peerId) {
   video.srcObject = null;
   requestAnimationFrame(() => {
     video.srcObject = stream;
-    video.play().catch(() => {});
+    video.play().catch(err => console.warn('play() falhou ao atualizar', peerId, err));
   });
 }
 
@@ -610,15 +660,42 @@ $('camBtn').onclick = () => {
 $('screenBtn').onclick = async () => {
   if (!sharingScreen) {
     try {
-      screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      // Limita resolução/fps: telas de PC em resolução nativa (às vezes 4K)
+      // geram um bitrate que o TURN gratuito não aguenta e o vídeo não chega.
+      screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          width: { ideal: 1280, max: 1920 },
+          height: { ideal: 720, max: 1080 },
+          frameRate: { ideal: 15, max: 30 }
+        },
+        audio: false
+      });
     } catch (e) {
       return toast('Compartilhamento cancelado.');
     }
     const screenTrack = screenStream.getVideoTracks()[0];
 
+    // Aplica constraints extras direto na track, como reforço
+    try {
+      await screenTrack.applyConstraints({
+        width: { max: 1920 },
+        height: { max: 1080 },
+        frameRate: { max: 30 }
+      });
+    } catch (e) { console.warn('applyConstraints falhou:', e); }
+
+    let replaced = false;
     Object.values(calls).forEach(call => {
       const sender = call.peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
-      if (sender) sender.replaceTrack(screenTrack);
+      if (sender) {
+        sender.replaceTrack(screenTrack).then(() => { replaced = true; });
+        // Limita o bitrate de envio do vídeo de tela para não sufocar
+        // conexões que precisem passar pelo TURN.
+        const params = sender.getParameters();
+        if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+        params.encodings[0].maxBitrate = 1_500_000; // ~1.5 Mbps
+        sender.setParameters(params).catch(err => console.warn('setParameters falhou:', err));
+      }
     });
 
     addTile('me', screenStream, myName + ' (sua tela)', true);
