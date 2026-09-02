@@ -545,7 +545,8 @@ function limitVideoBitrate(call, maxBitrate) {
 
 function startScreenCallToPeer(peerId) {
   if (!screenStream) return;
-  const outStream = new MediaStream([screenStream.getVideoTracks()[0]]);
+  const tracks = [...screenStream.getVideoTracks(), ...screenStream.getAudioTracks()];
+  const outStream = new MediaStream(tracks);
   const call = peer.call(peerId, outStream, { metadata: { name: myName, kind: 'screen' } });
   screenCallsOut[peerId] = call;
   call.on('error', (err) => console.error('[screen call out error]', peerId, err));
@@ -701,20 +702,29 @@ $('camBtn').onclick = () => {
 $('screenBtn').onclick = async () => {
   if (!sharingScreen) {
     try {
-      // Limita resolução/fps: telas de PC em resolução nativa (às vezes 4K)
-      // geram um bitrate desnecessariamente alto.
+      // Pede vídeo + áudio. O áudio só vem se o usuário marcar a opção
+      // "Compartilhar áudio" na caixa de diálogo do navegador (aparece ao
+      // escolher uma aba, ou uma janela/tela inteira em navegadores que suportam).
       screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
           width: { ideal: 1280, max: 1920 },
           height: { ideal: 720, max: 1080 },
           frameRate: { ideal: 15, max: 30 }
         },
-        audio: false
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false
+        }
       });
     } catch (e) {
       return toast('Compartilhamento cancelado.');
     }
     const screenTrack = screenStream.getVideoTracks()[0];
+
+    if (screenStream.getAudioTracks().length === 0) {
+      toast('Tela compartilhada sem áudio. Pra mandar o som junto, marque "Compartilhar áudio" na caixa do navegador (funciona melhor compartilhando uma aba do Chrome).', 6000);
+    }
 
     sharingScreen = true;
 
