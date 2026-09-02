@@ -453,10 +453,21 @@ async function initPeer(id) {
   });
 }
 
+// screenCallsOut: chamadas que EU abro pra enviar minha tela pra cada peer
+// screenCallsIn: chamadas de tela que EU recebo de cada peer
+const screenCallsOut = {};
+const screenCallsIn = {};
+
 function setupIncomingHandlers() {
   peer.on('call', (call) => {
-    call.answer(getSendStream());
-    handleCall(call);
+    if (call.metadata?.kind === 'screen') {
+      // Chamada dedicada de compartilhamento de tela: eu só recebo, não envio nada.
+      call.answer();
+      handleScreenCall(call);
+    } else {
+      call.answer(getSendStream());
+      handleCall(call);
+    }
   });
 
   peer.on('connection', (conn) => {
@@ -466,22 +477,22 @@ function setupIncomingHandlers() {
 
 const remoteStreams = {}; // peerId -> MediaStream
 
-function watchConnectionState(call) {
+function watchConnectionState(call, badgeTileId) {
   // Ajuda a diagnosticar: mostra no console e num badge discreto
-  // se a conexão ficou "relay" (TURN) em vez de direta (host/srflx).
+  // se a conexão ficou "relay" (TURN) ou direta (host/srflx).
   const pc = call.peerConnection;
   if (!pc) return;
   pc.oniceconnectionstatechange = () => {
-    console.log('[ICE] ' + call.peer + ':', pc.iceConnectionState);
+    console.log('[ICE] ' + badgeTileId + ':', pc.iceConnectionState);
     if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
       pc.getStats(null).then(stats => {
         stats.forEach(report => {
           if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) {
             const localCand = stats.get(report.localCandidateId);
             const type = localCand ? localCand.candidateType : '?';
-            const badge = document.getElementById('badge-' + call.peer);
+            const badge = document.getElementById('badge-' + badgeTileId);
             if (badge) badge.textContent = type === 'relay' ? '↻ relay (TURN)' : '● direto';
-            console.log('[ICE pair] ' + call.peer + ' via', type);
+            console.log('[ICE pair] ' + badgeTileId + ' via', type);
           }
         });
       }).catch(() => {});
@@ -491,7 +502,7 @@ function watchConnectionState(call) {
 
 function handleCall(call) {
   calls[call.peer] = call;
-  watchConnectionState(call);
+  watchConnectionState(call, call.peer);
   call.on('stream', (remoteStream) => {
     remoteStreams[call.peer] = remoteStream;
     addTile(call.peer, remoteStream, peerNames[call.peer] || call.metadata?.name || 'Convidado');
@@ -504,15 +515,42 @@ function handleCall(call) {
   call.on('error', (err) => console.error('[call error]', call.peer, err));
 }
 
-function refreshRemoteVideo(peerId) {
-  const video = document.querySelector('#tile-' + peerId + ' video');
-  const stream = remoteStreams[peerId];
-  if (!video || !stream) return;
-  video.srcObject = null;
-  requestAnimationFrame(() => {
-    video.srcObject = stream;
-    video.play().catch(err => console.warn('play() falhou ao atualizar', peerId, err));
+function handleScreenCall(call) {
+  screenCallsIn[call.peer] = call;
+  watchConnectionState(call, call.peer + '-screen');
+  call.on('stream', (remoteStream) => {
+    addTile(call.peer, remoteStream, peerNames[call.peer] || call.metadata?.name || 'Convidado', true);
   });
+  call.on('close', () => {
+    removeTile(call.peer + '-screen');
+    delete screenCallsIn[call.peer];
+  });
+  call.on('error', (err) => console.error('[screen call error]', call.peer, err));
+}
+
+function limitVideoBitrate(call, maxBitrate) {
+  const pc = call.peerConnection;
+  if (!pc) return;
+  const trySet = () => {
+    const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+    if (!sender) return;
+    const params = sender.getParameters();
+    if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+    params.encodings[0].maxBitrate = maxBitrate;
+    sender.setParameters(params).catch(err => console.warn('setParameters falhou:', err));
+  };
+  trySet();
+  setTimeout(trySet, 500); // reforço caso o sender ainda não existisse na 1ª tentativa
+}
+
+function startScreenCallToPeer(peerId) {
+  if (!screenStream) return;
+  const outStream = new MediaStream([screenStream.getVideoTracks()[0]]);
+  const call = peer.call(peerId, outStream, { metadata: { name: myName, kind: 'screen' } });
+  screenCallsOut[peerId] = call;
+  call.on('error', (err) => console.error('[screen call out error]', peerId, err));
+  call.on('close', () => { delete screenCallsOut[peerId]; });
+  limitVideoBitrate(call, 1_500_000); // ~1.5 Mbps, ajuda em conexões mais fracas
 }
 
 function connectToPeer(remoteId) {
@@ -538,6 +576,11 @@ function setupDataConn(conn) {
       // tell everyone else about the newcomer
       broadcastExcept(conn.peer, { type: 'new-peer', peerId: conn.peer });
     }
+
+    // Se eu já estiver compartilhando tela, manda pro peer que acabou de conectar também.
+    if (sharingScreen && !screenCallsOut[conn.peer]) {
+      startScreenCallToPeer(conn.peer);
+    }
   });
 
   conn.on('data', (data) => {
@@ -552,10 +595,6 @@ function setupDataConn(conn) {
       peerNames[conn.peer] = data.name;
       const lbl = document.querySelector('#tile-' + conn.peer + ' .label');
       if (lbl) lbl.textContent = data.name;
-    } else if (data.type === 'screen-share') {
-      const tile = document.getElementById('tile-' + conn.peer);
-      if (tile) tile.classList.toggle('screen', data.on);
-      refreshRemoteVideo(conn.peer);
     } else if (data.type === 'kick') {
       if (conn.peer === roomId) {
         toast('Você foi removido da sala pelo host.', 4000);
@@ -566,6 +605,8 @@ function setupDataConn(conn) {
       removeTile(conn.peer);
       removeTile(conn.peer + '-screen');
       if (calls[conn.peer]) { calls[conn.peer].close(); delete calls[conn.peer]; }
+      if (screenCallsIn[conn.peer]) { screenCallsIn[conn.peer].close(); delete screenCallsIn[conn.peer]; }
+      if (screenCallsOut[conn.peer]) { screenCallsOut[conn.peer].close(); delete screenCallsOut[conn.peer]; }
     }
   });
 
@@ -661,7 +702,7 @@ $('screenBtn').onclick = async () => {
   if (!sharingScreen) {
     try {
       // Limita resolução/fps: telas de PC em resolução nativa (às vezes 4K)
-      // geram um bitrate que o TURN gratuito não aguenta e o vídeo não chega.
+      // geram um bitrate desnecessariamente alto.
       screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
           width: { ideal: 1280, max: 1920 },
@@ -675,35 +716,18 @@ $('screenBtn').onclick = async () => {
     }
     const screenTrack = screenStream.getVideoTracks()[0];
 
-    // Aplica constraints extras direto na track, como reforço
-    try {
-      await screenTrack.applyConstraints({
-        width: { max: 1920 },
-        height: { max: 1080 },
-        frameRate: { max: 30 }
-      });
-    } catch (e) { console.warn('applyConstraints falhou:', e); }
+    sharingScreen = true;
 
-    let replaced = false;
-    Object.values(calls).forEach(call => {
-      const sender = call.peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
-      if (sender) {
-        sender.replaceTrack(screenTrack).then(() => { replaced = true; });
-        // Limita o bitrate de envio do vídeo de tela para não sufocar
-        // conexões que precisem passar pelo TURN.
-        const params = sender.getParameters();
-        if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
-        params.encodings[0].maxBitrate = 1_500_000; // ~1.5 Mbps
-        sender.setParameters(params).catch(err => console.warn('setParameters falhou:', err));
-      }
-    });
+    // Abre uma chamada NOVA e dedicada pra tela com cada peer já conectado,
+    // em vez de reaproveitar (replaceTrack) a chamada de câmera. Isso evita
+    // o bug de tela preta que acontece quando se troca a track de uma
+    // chamada já em andamento sem renegociação completa.
+    Object.keys(dataConns).forEach(peerId => startScreenCallToPeer(peerId));
 
     addTile('me', screenStream, myName + ' (sua tela)', true);
     document.getElementById('tile-me').classList.add('hidden');
 
-    broadcastExcept(null, { type: 'screen-share', on: true });
     screenTrack.onended = () => stopScreenShare();
-    sharingScreen = true;
     $('screenBtn').textContent = '🛑 Parar compartilhamento';
   } else {
     stopScreenShare();
@@ -712,22 +736,20 @@ $('screenBtn').onclick = async () => {
 
 function stopScreenShare() {
   if (!sharingScreen) return;
-  const camTrack = localStream.getVideoTracks()[0];
-  Object.values(calls).forEach(call => {
-    const sender = call.peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
-    if (sender && camTrack) sender.replaceTrack(camTrack);
-  });
+  Object.values(screenCallsOut).forEach(call => call.close());
+  for (const k in screenCallsOut) delete screenCallsOut[k];
   if (screenStream) screenStream.getTracks().forEach(t => t.stop());
   removeTile('me-screen');
   document.getElementById('tile-me').classList.remove('hidden');
   sharingScreen = false;
   $('screenBtn').textContent = '🖥️ Compartilhar tela';
-  broadcastExcept(null, { type: 'screen-share', on: false });
 }
 
 function leaveRoom() {
   Object.values(dataConns).forEach(c => { if (c.open) c.send({ type: 'bye' }); });
   Object.values(calls).forEach(c => c.close());
+  Object.values(screenCallsOut).forEach(c => c.close());
+  Object.values(screenCallsIn).forEach(c => c.close());
   Object.values(dataConns).forEach(c => c.close());
   if (localStream) localStream.getTracks().forEach(t => t.stop());
   if (screenStream) screenStream.getTracks().forEach(t => t.stop());
