@@ -797,9 +797,10 @@ $('screenBtn').onclick = async () => {
       return toast('Compartilhamento cancelado.');
     }
     const screenTrack = screenStream.getVideoTracks()[0];
-    // Dá uma dica pro encoder priorizar movimento fluido (bom pra jogos/vídeo)
-    // em vez de nitidez estática de texto.
-    try { screenTrack.contentHint = 'motion'; } catch (e) {}
+    // Deixa o navegador decidir sozinho o melhor modo de codificação
+    // (ele já detecta bem: prioriza nitidez pra conteúdo parado/texto,
+    // e se ajusta quando há movimento). Forçar 'motion' aqui piorava a
+    // qualidade de telas estáticas.
 
     if (screenStream.getAudioTracks().length === 0) {
       toast('Tela compartilhada sem áudio. Pra mandar o som junto, marque "Compartilhar áudio" na caixa do navegador (funciona melhor compartilhando uma aba do Chrome).', 6000);
