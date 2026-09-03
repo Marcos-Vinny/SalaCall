@@ -287,7 +287,7 @@ async function getLocalStream() {
   }
 }
 
-function addTile(id, stream, label, isScreen = false) {
+function addTile(id, stream, label, isScreen = false, hasAudio = null) {
   removeTile(id + (isScreen ? '-screen' : ''));
   const tile = document.createElement('div');
   tile.className = 'tile' + (isScreen ? ' screen' : '');
@@ -296,6 +296,7 @@ function addTile(id, stream, label, isScreen = false) {
   const video = document.createElement('video');
   video.autoplay = true;
   video.playsInline = true;
+  video.volume = 1;
   if (id === 'me') video.muted = true;
   video.srcObject = stream;
   video.play().catch(err => console.warn('play() falhou (tile ' + tileId + '):', err));
@@ -326,7 +327,17 @@ function addTile(id, stream, label, isScreen = false) {
     tile.appendChild(badge);
   }
 
-  if (id !== 'me' && !isScreen) {
+  // Selo de áudio na tile de tela: deixa bem claro se o compartilhamento
+  // veio com som ou não, pra não ficar procurando "por que não ouço".
+  if (isScreen && hasAudio !== null) {
+    const audioBadge = document.createElement('div');
+    audioBadge.style.cssText = 'position:absolute; top:8px; left:48px; font-size:11px; padding:3px 8px; border-radius:6px; background:rgba(0,0,0,0.6);';
+    audioBadge.textContent = hasAudio ? '🔊 com áudio' : '🔇 sem áudio';
+    audioBadge.style.color = hasAudio ? 'var(--accent-2)' : 'var(--danger)';
+    tile.appendChild(audioBadge);
+  }
+
+  if (id !== 'me' && (!isScreen || hasAudio)) {
     const volWrap = document.createElement('div');
     volWrap.className = 'vol-wrap';
     const volIcon = document.createElement('span');
@@ -340,25 +351,25 @@ function addTile(id, stream, label, isScreen = false) {
     volWrap.appendChild(volIcon);
     volWrap.appendChild(volSlider);
     tile.appendChild(volWrap);
+  }
 
-    if (isHost) {
-      const kickBtn = document.createElement('button');
-      kickBtn.className = 'kick-btn';
-      kickBtn.title = 'Remover da sala';
-      kickBtn.textContent = '⛔';
-      kickBtn.onclick = (e) => {
-        e.stopPropagation();
-        if (!confirm('Remover ' + label + ' da sala?')) return;
-        const conn = dataConns[id];
-        if (conn && conn.open) conn.send({ type: 'kick' });
-        if (calls[id]) { calls[id].close(); delete calls[id]; }
-        if (conn) conn.close();
-        delete dataConns[id];
-        knownPeers.delete(id);
-        removeTile(id);
-      };
-      tile.appendChild(kickBtn);
-    }
+  if (id !== 'me' && !isScreen && isHost) {
+    const kickBtn = document.createElement('button');
+    kickBtn.className = 'kick-btn';
+    kickBtn.title = 'Remover da sala';
+    kickBtn.textContent = '⛔';
+    kickBtn.onclick = (e) => {
+      e.stopPropagation();
+      if (!confirm('Remover ' + label + ' da sala?')) return;
+      const conn = dataConns[id];
+      if (conn && conn.open) conn.send({ type: 'kick' });
+      if (calls[id]) { calls[id].close(); delete calls[id]; }
+      if (conn) conn.close();
+      delete dataConns[id];
+      knownPeers.delete(id);
+      removeTile(id);
+    };
+    tile.appendChild(kickBtn);
   }
 
   $('videoGrid').appendChild(tile);
@@ -519,7 +530,14 @@ function handleScreenCall(call) {
   screenCallsIn[call.peer] = call;
   watchConnectionState(call, call.peer + '-screen');
   call.on('stream', (remoteStream) => {
-    addTile(call.peer, remoteStream, peerNames[call.peer] || call.metadata?.name || 'Convidado', true);
+    const hasAudio = remoteStream.getAudioTracks().length > 0;
+    console.log('[screen stream] de ' + call.peer + ' — áudio:', hasAudio ? 'sim (' + remoteStream.getAudioTracks().length + ' track)' : 'NÃO veio nenhuma track de áudio');
+    remoteStream.getAudioTracks().forEach(t => {
+      console.log('  audio track:', t.label, '| enabled:', t.enabled, '| muted:', t.muted, '| readyState:', t.readyState);
+      t.onmute = () => console.log('  [audio track mutou]', call.peer);
+      t.onunmute = () => console.log('  [audio track desmutou]', call.peer);
+    });
+    addTile(call.peer, remoteStream, peerNames[call.peer] || call.metadata?.name || 'Convidado', true, hasAudio);
   });
   call.on('close', () => {
     removeTile(call.peer + '-screen');
@@ -537,6 +555,8 @@ function limitVideoBitrate(call, maxBitrate) {
     const params = sender.getParameters();
     if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
     params.encodings[0].maxBitrate = maxBitrate;
+    params.encodings[0].scaleResolutionDownBy = 1; // não deixa o navegador reduzir a resolução sozinho
+    params.degradationPreference = 'maintain-resolution'; // prioriza nitidez/resolução em vez de cair fps
     sender.setParameters(params).catch(err => console.warn('setParameters falhou:', err));
   };
   trySet();
@@ -551,7 +571,7 @@ function startScreenCallToPeer(peerId) {
   screenCallsOut[peerId] = call;
   call.on('error', (err) => console.error('[screen call out error]', peerId, err));
   call.on('close', () => { delete screenCallsOut[peerId]; });
-  limitVideoBitrate(call, 1_500_000); // ~1.5 Mbps, ajuda em conexões mais fracas
+  limitVideoBitrate(call, 6_000_000); // ~6 Mbps, dá pra 1080p/30fps sem ficar blocado
 }
 
 function connectToPeer(remoteId) {
@@ -707,9 +727,9 @@ $('screenBtn').onclick = async () => {
       // escolher uma aba, ou uma janela/tela inteira em navegadores que suportam).
       screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
-          width: { ideal: 1280, max: 1920 },
-          height: { ideal: 720, max: 1080 },
-          frameRate: { ideal: 15, max: 30 }
+          width: { ideal: 1920, max: 1920 },
+          height: { ideal: 1080, max: 1080 },
+          frameRate: { ideal: 30, max: 60 }
         },
         audio: {
           echoCancellation: false,
@@ -721,6 +741,9 @@ $('screenBtn').onclick = async () => {
       return toast('Compartilhamento cancelado.');
     }
     const screenTrack = screenStream.getVideoTracks()[0];
+    // Dá uma dica pro encoder priorizar movimento fluido (bom pra jogos/vídeo)
+    // em vez de nitidez estática de texto.
+    try { screenTrack.contentHint = 'motion'; } catch (e) {}
 
     if (screenStream.getAudioTracks().length === 0) {
       toast('Tela compartilhada sem áudio. Pra mandar o som junto, marque "Compartilhar áudio" na caixa do navegador (funciona melhor compartilhando uma aba do Chrome).', 6000);
@@ -734,7 +757,7 @@ $('screenBtn').onclick = async () => {
     // chamada já em andamento sem renegociação completa.
     Object.keys(dataConns).forEach(peerId => startScreenCallToPeer(peerId));
 
-    addTile('me', screenStream, myName + ' (sua tela)', true);
+    addTile('me', screenStream, myName + ' (sua tela)', true, screenStream.getAudioTracks().length > 0);
     document.getElementById('tile-me').classList.add('hidden');
 
     screenTrack.onended = () => stopScreenShare();
