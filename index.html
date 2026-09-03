@@ -554,9 +554,12 @@ function limitVideoBitrate(call, maxBitrate) {
     if (!sender) return;
     const params = sender.getParameters();
     if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
-    params.encodings[0].maxBitrate = maxBitrate;
-    params.encodings[0].scaleResolutionDownBy = 1; // não deixa o navegador reduzir a resolução sozinho
-    params.degradationPreference = 'maintain-resolution'; // prioriza nitidez/resolução em vez de cair fps
+    params.encodings[0].maxBitrate = maxBitrate; // teto - nunca passa disso
+    // Deixa o navegador reduzir resolução sozinho se a rede não aguentar,
+    // e priorizar manter os fps fluidos em vez de travar a imagem.
+    // Ele volta pra qualidade máxima automaticamente assim que a rede folga.
+    delete params.encodings[0].scaleResolutionDownBy;
+    params.degradationPreference = 'maintain-framerate';
     sender.setParameters(params).catch(err => console.warn('setParameters falhou:', err));
   };
   trySet();
