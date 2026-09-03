@@ -425,15 +425,6 @@ function updateFullscreenIcons() {
   }
 }
 
-function getSendStream() {
-  if (sharingScreen && screenStream) {
-    const s = new MediaStream();
-    localStream.getAudioTracks().forEach(t => s.addTrack(t));
-    screenStream.getVideoTracks().forEach(t => s.addTrack(t));
-    return s;
-  }
-  return localStream;
-}
 
 // ICE config: STUN + múltiplos TURN de fallback.
 // O TURN é essencial quando um lado está atrás de NAT/firewall restritivo
@@ -458,11 +449,29 @@ async function initPeer(id) {
     peer.on('open', (pid) => resolve(pid));
     peer.on('error', (err) => {
       console.error(err);
-      toast('Erro: ' + err.type);
+      if (err.type !== 'peer-unavailable') toast('Erro: ' + err.type);
       reject(err);
+    });
+    // Se a conexão com o servidor de sinalização cair (celular foi pra
+    // segundo plano, rede oscilou, etc.), tenta reconectar sozinho em vez
+    // de deixar o código da sala "morto" sem avisar ninguém.
+    peer.on('disconnected', () => {
+      console.warn('[peer] desconectado do servidor, tentando reconectar...');
+      setTimeout(() => { if (peer && !peer.destroyed) peer.reconnect(); }, 1000);
+    });
+    peer.on('close', () => {
+      console.warn('[peer] peer destruído — sessão de sinalização encerrada.');
     });
   });
 }
+
+// Quando a aba volta a ficar visível (usuário voltou pro navegador no
+// celular), garante que a conexão de sinalização está viva.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && peer && peer.disconnected && !peer.destroyed) {
+    peer.reconnect();
+  }
+});
 
 // screenCallsOut: chamadas que EU abro pra enviar minha tela pra cada peer
 // screenCallsIn: chamadas de tela que EU recebo de cada peer
@@ -476,7 +485,7 @@ function setupIncomingHandlers() {
       call.answer();
       handleScreenCall(call);
     } else {
-      call.answer(getSendStream());
+      call.answer(localStream);
       handleCall(call);
     }
   });
@@ -579,7 +588,7 @@ function startScreenCallToPeer(peerId) {
 
 function connectToPeer(remoteId) {
   if (remoteId === peer.id || calls[remoteId]) return;
-  const call = peer.call(remoteId, getSendStream(), { metadata: { name: myName } });
+  const call = peer.call(remoteId, localStream, { metadata: { name: myName } });
   handleCall(call);
 
   const conn = peer.connect(remoteId, { metadata: { name: myName } });
@@ -673,10 +682,7 @@ async function enterRoom(code, hosting) {
   setupIncomingHandlers();
 
   if (!hosting) {
-    const conn = peer.connect(code, { metadata: { name: myName } });
-    setupDataConn(conn);
-    const call = peer.call(code, getSendStream(), { metadata: { name: myName } });
-    handleCall(call);
+    await connectToHostWithRetry(code);
   }
 
   knownPeers.add(peer.id);
@@ -686,6 +692,45 @@ async function enterRoom(code, hosting) {
   $('myNameLabel').textContent = myName;
   $('roomCodeLabel').textContent = roomId;
   addTile('me', localStream, myName + ' (você)');
+}
+
+// Tenta conectar no host; se vier "peer-unavailable" pode ser só timing
+// (o host acabou de criar a sala e ainda não propagou no servidor, ou
+// teve uma queda momentânea), então tenta de novo antes de desistir.
+function connectToHostWithRetry(code, attempt = 1) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+
+    const conn = peer.connect(code, { metadata: { name: myName } });
+    setupDataConn(conn);
+    const call = peer.call(code, localStream, { metadata: { name: myName } });
+    handleCall(call);
+
+    conn.on('open', () => { settled = true; resolve(); });
+
+    const onError = (err) => {
+      if (settled) return;
+      if (err.type === 'peer-unavailable') {
+        peer.off('error', onError);
+        if (attempt < 4) {
+          toast('Sala não respondeu, tentando de novo... (' + attempt + '/3)', 2000);
+          setTimeout(() => {
+            settled = true;
+            connectToHostWithRetry(code, attempt + 1).then(resolve).catch(reject);
+          }, 1500);
+        } else {
+          settled = true;
+          toast('Não foi possível encontrar essa sala. Confirme o código com quem criou, ou peça pra ela(e) criar de novo.', 6000);
+          reject(err);
+        }
+      }
+    };
+    peer.on('error', onError);
+
+    // Se não conectar em 5s (sem erro explícito), considera aberto mesmo assim
+    // — pode ser só a mídia demorando; a data connection cobre o essencial.
+    setTimeout(() => { if (!settled) { settled = true; resolve(); } }, 5000);
+  });
 }
 
 $('createBtn').onclick = async () => {
@@ -701,7 +746,13 @@ $('joinBtn').onclick = async () => {
   const code = $('roomInput').value.trim().toUpperCase();
   if (!code) return toast('Cole o código da sala primeiro.');
   try { await enterRoom(code, false); }
-  catch (e) { toast('Não foi possível entrar: ' + (e.message || e.name || e) + '. Se estiver num navegador dentro de outro app (Instagram, TikTok etc.), abra no Chrome/Safari.', 6000); }
+  catch (e) {
+    if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+    if (peer) { peer.destroy(); peer = null; }
+    if (e?.type !== 'peer-unavailable') {
+      toast('Não foi possível entrar: ' + (e.message || e.name || e) + '. Se estiver num navegador dentro de outro app (Instagram, TikTok etc.), abra no Chrome/Safari.', 6000);
+    }
+  }
 };
 
 $('copyBtn').onclick = () => {
@@ -730,6 +781,7 @@ $('screenBtn').onclick = async () => {
       // escolher uma aba, ou uma janela/tela inteira em navegadores que suportam).
       screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
+          displaySurface: 'window', // sugere ao navegador abrir já na aba "Janela"
           width: { ideal: 2560, max: 2560 },
           height: { ideal: 1440, max: 1440 },
           frameRate: { ideal: 60, max: 60 }
@@ -737,7 +789,8 @@ $('screenBtn').onclick = async () => {
         audio: {
           echoCancellation: false,
           noiseSuppression: false,
-          autoGainControl: false
+          autoGainControl: false,
+          systemAudio: 'exclude' // impede pegar o áudio misturado de TODO o sistema
         }
       });
     } catch (e) {
