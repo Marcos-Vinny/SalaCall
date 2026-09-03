@@ -155,7 +155,6 @@
   .tile.expanded .maximize-btn,
   .tile.expanded .fullscreen-btn { opacity: 1; }
 
- 
   .tile:fullscreen,
   .tile:-webkit-full-screen {
     aspect-ratio: unset;
@@ -212,7 +211,6 @@
     <p>Chamada de voz/vídeo + compartilhamento de tela entre amigos, direto no navegador.</p>
   </header>
 
-  
   <div id="lobby" class="card lobby">
     <div>
       <label>Seu nome (aparece pros outros na chamada)</label>
@@ -232,7 +230,6 @@
     <p class="hint">Preencha seu nome antes de criar ou entrar. Todos precisam liberar acesso ao microfone (e câmera, se quiserem).</p>
   </div>
 
-  
   <div id="room" class="card hidden">
     <div class="room-bar">
       <div><span class="status-dot"></span>Conectado como <b id="myNameLabel"></b></div>
@@ -265,7 +262,6 @@ const dataConns = {};
 const knownPeers = new Set(); 
 const peerNames = {}; 
 let camOn = false, micOn = false, sharingScreen = false;
-
 function toast(msg, ms = 2500) {
   const t = $('toast');
   t.textContent = msg;
@@ -273,11 +269,9 @@ function toast(msg, ms = 2500) {
   clearTimeout(t._timer);
   t._timer = setTimeout(() => t.classList.add('hidden'), ms);
 }
-
 function genRoomCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
-
 async function getLocalStream() {
   try {
     return await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
@@ -286,7 +280,6 @@ async function getLocalStream() {
     return await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
   }
 }
-
 function addTile(id, stream, label, isScreen = false, hasAudio = null) {
   removeTile(id + (isScreen ? '-screen' : ''));
   const tile = document.createElement('div');
@@ -318,7 +311,6 @@ function addTile(id, stream, label, isScreen = false, hasAudio = null) {
   tile.appendChild(lbl);
   tile.appendChild(maxBtn);
   tile.appendChild(fsBtn);
-
   if (id !== 'me') {
     const badge = document.createElement('div');
     badge.className = 'conn-badge';
@@ -326,7 +318,6 @@ function addTile(id, stream, label, isScreen = false, hasAudio = null) {
     badge.textContent = '';
     tile.appendChild(badge);
   }
-
   
   if (isScreen && hasAudio !== null) {
     const audioBadge = document.createElement('div');
@@ -335,7 +326,6 @@ function addTile(id, stream, label, isScreen = false, hasAudio = null) {
     audioBadge.style.color = hasAudio ? 'var(--accent-2)' : 'var(--danger)';
     tile.appendChild(audioBadge);
   }
-
   if (id !== 'me' && (!isScreen || hasAudio)) {
     const volWrap = document.createElement('div');
     volWrap.className = 'vol-wrap';
@@ -351,7 +341,6 @@ function addTile(id, stream, label, isScreen = false, hasAudio = null) {
     volWrap.appendChild(volSlider);
     tile.appendChild(volWrap);
   }
-
   if (id !== 'me' && !isScreen && isHost) {
     const kickBtn = document.createElement('button');
     kickBtn.className = 'kick-btn';
@@ -370,10 +359,8 @@ function addTile(id, stream, label, isScreen = false, hasAudio = null) {
     };
     tile.appendChild(kickBtn);
   }
-
   $('videoGrid').appendChild(tile);
 }
-
 function removeTile(id) {
   const el = document.getElementById('tile-' + id);
   if (el) {
@@ -381,7 +368,6 @@ function removeTile(id) {
     el.remove();
   }
 }
-
 function toggleExpand(tileId) {
   const grid = $('videoGrid');
   const tile = document.getElementById('tile-' + tileId);
@@ -399,7 +385,6 @@ function toggleExpand(tileId) {
     grid.classList.remove('has-expanded');
   }
 }
-
 function toggleFullscreen(tile, fsBtn) {
   const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
   if (!fsEl) {
@@ -411,10 +396,8 @@ function toggleFullscreen(tile, fsBtn) {
     if (exit) exit.call(document);
   }
 }
-
 document.addEventListener('fullscreenchange', updateFullscreenIcons);
 document.addEventListener('webkitfullscreenchange', updateFullscreenIcons);
-
 function updateFullscreenIcons() {
   const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
   document.querySelectorAll('.fullscreen-btn').forEach(btn => btn.textContent = '⤢');
@@ -423,9 +406,6 @@ function updateFullscreenIcons() {
     if (btn) btn.textContent = '✕';
   }
 }
-
-
-
 const ICE_CONFIG = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -436,7 +416,6 @@ const ICE_CONFIG = {
   ],
   iceCandidatePoolSize: 4
 };
-
 async function initPeer(id) {
   return new Promise((resolve, reject) => {
     peer = new Peer(id, {
@@ -459,22 +438,16 @@ async function initPeer(id) {
     });
   });
 }
-
-
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && peer && peer.disconnected && !peer.destroyed) {
     peer.reconnect();
   }
 });
-
-
 const screenCallsOut = {};
 const screenCallsIn = {};
-
 function setupIncomingHandlers() {
   peer.on('call', (call) => {
     if (call.metadata?.kind === 'screen') {
-      
       call.answer();
       handleScreenCall(call);
     } else {
@@ -482,12 +455,10 @@ function setupIncomingHandlers() {
       handleCall(call);
     }
   });
-
   peer.on('connection', (conn) => {
     setupDataConn(conn);
   });
 }
-
 const remoteStreams = {}; 
 function watchConnectionState(call, badgeTileId) {
   
@@ -510,7 +481,6 @@ function watchConnectionState(call, badgeTileId) {
     }
   };
 }
-
 function handleCall(call) {
   calls[call.peer] = call;
   watchConnectionState(call, call.peer);
@@ -525,7 +495,6 @@ function handleCall(call) {
   });
   call.on('error', (err) => console.error('[call error]', call.peer, err));
 }
-
 function handleScreenCall(call) {
   screenCallsIn[call.peer] = call;
   watchConnectionState(call, call.peer + '-screen');
@@ -545,7 +514,6 @@ function handleScreenCall(call) {
   });
   call.on('error', (err) => console.error('[screen call error]', call.peer, err));
 }
-
 function limitVideoBitrate(call, maxBitrate) {
   const pc = call.peerConnection;
   if (!pc) return;
@@ -555,6 +523,7 @@ function limitVideoBitrate(call, maxBitrate) {
     const params = sender.getParameters();
     if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
     params.encodings[0].maxBitrate = maxBitrate; 
+    
     delete params.encodings[0].scaleResolutionDownBy;
     params.degradationPreference = 'maintain-framerate';
     sender.setParameters(params).catch(err => console.warn('setParameters falhou:', err));
@@ -562,7 +531,6 @@ function limitVideoBitrate(call, maxBitrate) {
   trySet();
   setTimeout(trySet, 500); 
 }
-
 function startScreenCallToPeer(peerId) {
   if (!screenStream) return;
   const tracks = [...screenStream.getVideoTracks(), ...screenStream.getAudioTracks()];
@@ -573,37 +541,28 @@ function startScreenCallToPeer(peerId) {
   call.on('close', () => { delete screenCallsOut[peerId]; });
   limitVideoBitrate(call, 12_000_000); 
 }
-
 function connectToPeer(remoteId) {
   if (remoteId === peer.id || calls[remoteId]) return;
   const call = peer.call(remoteId, localStream, { metadata: { name: myName } });
   handleCall(call);
-
   const conn = peer.connect(remoteId, { metadata: { name: myName } });
   setupDataConn(conn);
 }
-
 function setupDataConn(conn) {
   dataConns[conn.peer] = conn;
   if (conn.metadata?.name) peerNames[conn.peer] = conn.metadata.name;
-
   conn.on('open', () => {
     conn.send({ type: 'hello', name: myName });
     knownPeers.add(conn.peer);
-
     if (isHost) {
-      
       conn.send({ type: 'peer-list', peers: [...knownPeers].filter(p => p !== conn.peer) });
-      
       broadcastExcept(conn.peer, { type: 'new-peer', peerId: conn.peer });
     }
-
     
     if (sharingScreen && !screenCallsOut[conn.peer]) {
       startScreenCallToPeer(conn.peer);
     }
   });
-
   conn.on('data', (data) => {
     if (data.type === 'peer-list') {
       data.peers.forEach(pid => {
@@ -630,7 +589,6 @@ function setupDataConn(conn) {
       if (screenCallsOut[conn.peer]) { screenCallsOut[conn.peer].close(); delete screenCallsOut[conn.peer]; }
     }
   });
-
   conn.on('close', () => {
     delete dataConns[conn.peer];
     knownPeers.delete(conn.peer);
@@ -638,13 +596,11 @@ function setupDataConn(conn) {
     removeTile(conn.peer + '-screen');
   });
 }
-
 function broadcastExcept(exceptId, msg) {
   Object.values(dataConns).forEach(c => {
     if (c.peer !== exceptId && c.open) c.send(msg);
   });
 }
-
 function getValidName() {
   const name = $('nameInput').value.trim();
   if (!name) {
@@ -652,48 +608,47 @@ function getValidName() {
     $('nameInput').focus();
     return null;
   }
+  try { localStorage.setItem('timespeak_last_name', name); } catch (e) {}
   return name;
 }
-
+(function prefillLastName() {
+  try {
+    const last = localStorage.getItem('timespeak_last_name');
+    if (last) {
+      $('nameInput').value = last;
+      $('nameInput').select(); 
+    }
+  } catch (e) {}
+})();
 async function enterRoom(code, hosting) {
   roomId = code;
   isHost = hosting;
-
   localStream = await getLocalStream();
   localStream.getAudioTracks().forEach(t => t.enabled = false);
   localStream.getVideoTracks().forEach(t => t.enabled = false);
   $('micBtn').textContent = '🔇 Mutado';
   $('camBtn').textContent = '📷 Desligada';
-
   const myId = hosting ? code : (code + '-' + Math.random().toString(36).substring(2, 8));
   await initPeer(myId);
   setupIncomingHandlers();
-
   if (!hosting) {
     await connectToHostWithRetry(code);
   }
-
   knownPeers.add(peer.id);
-
   $('lobby').classList.add('hidden');
   $('room').classList.remove('hidden');
   $('myNameLabel').textContent = myName;
   $('roomCodeLabel').textContent = roomId;
   addTile('me', localStream, myName + ' (você)');
 }
-
-
 function connectToHostWithRetry(code, attempt = 1) {
   return new Promise((resolve, reject) => {
     let settled = false;
-
     const conn = peer.connect(code, { metadata: { name: myName } });
     setupDataConn(conn);
     const call = peer.call(code, localStream, { metadata: { name: myName } });
     handleCall(call);
-
     conn.on('open', () => { settled = true; resolve(); });
-
     const onError = (err) => {
       if (settled) return;
       if (err.type === 'peer-unavailable') {
@@ -712,19 +667,16 @@ function connectToHostWithRetry(code, attempt = 1) {
       }
     };
     peer.on('error', onError);
-
     
     setTimeout(() => { if (!settled) { settled = true; resolve(); } }, 5000);
   });
 }
-
 $('createBtn').onclick = async () => {
   myName = getValidName();
   if (!myName) return;
   try { await enterRoom(genRoomCode(), true); }
   catch (e) { toast('Não foi possível criar a sala: ' + (e.message || e.name || e) + '. Se estiver num navegador dentro de outro app (Instagram, TikTok etc.), abra no Chrome/Safari.', 6000); }
 };
-
 $('joinBtn').onclick = async () => {
   myName = getValidName();
   if (!myName) return;
@@ -739,25 +691,21 @@ $('joinBtn').onclick = async () => {
     }
   }
 };
-
 $('copyBtn').onclick = () => {
   navigator.clipboard.writeText(roomId);
   toast('Código copiado!');
 };
-
 $('micBtn').onclick = () => {
   micOn = !micOn;
   localStream.getAudioTracks().forEach(t => t.enabled = micOn);
   $('micBtn').textContent = micOn ? '🎤 Mudo' : '🔇 Mutado';
 };
-
 $('camBtn').onclick = () => {
   if (sharingScreen) return toast('Pare o compartilhamento de tela primeiro.');
   camOn = !camOn;
   localStream.getVideoTracks().forEach(t => t.enabled = camOn);
   $('camBtn').textContent = camOn ? '📷 Câmera' : '📷 Desligada';
 };
-
 $('screenBtn').onclick = async () => {
   if (!sharingScreen) {
     try {
@@ -780,26 +728,23 @@ $('screenBtn').onclick = async () => {
       return toast('Compartilhamento cancelado.');
     }
     const screenTrack = screenStream.getVideoTracks()[0];
-   
+    
+    
     if (screenStream.getAudioTracks().length === 0) {
       toast('Tela compartilhada sem áudio. Pra mandar o som junto, marque "Compartilhar áudio" na caixa do navegador (funciona melhor compartilhando uma aba do Chrome).', 6000);
     }
-
     sharingScreen = true;
-
+    
     
     Object.keys(dataConns).forEach(peerId => startScreenCallToPeer(peerId));
-
     addTile('me', screenStream, myName + ' (sua tela)', true, screenStream.getAudioTracks().length > 0);
     document.getElementById('tile-me').classList.add('hidden');
-
     screenTrack.onended = () => stopScreenShare();
     $('screenBtn').textContent = '🛑 Parar compartilhamento';
   } else {
     stopScreenShare();
   }
 };
-
 function stopScreenShare() {
   if (!sharingScreen) return;
   Object.values(screenCallsOut).forEach(call => call.close());
@@ -810,7 +755,6 @@ function stopScreenShare() {
   sharingScreen = false;
   $('screenBtn').textContent = '🖥️ Compartilhar tela';
 }
-
 function leaveRoom() {
   Object.values(dataConns).forEach(c => { if (c.open) c.send({ type: 'bye' }); });
   Object.values(calls).forEach(c => c.close());
@@ -821,7 +765,6 @@ function leaveRoom() {
   if (screenStream) screenStream.getTracks().forEach(t => t.stop());
   if (peer) peer.destroy();
 }
-
 $('leaveBtn').onclick = () => { leaveRoom(); setTimeout(() => location.reload(), 150); };
 window.addEventListener('beforeunload', leaveRoom);
 </script>
